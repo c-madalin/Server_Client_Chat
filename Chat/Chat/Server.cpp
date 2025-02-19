@@ -2,6 +2,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <thread>
+#include <map>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -18,25 +19,32 @@ void cleanUpWinsock() {
     WSACleanup();
 }
 
+std::map<SOCKET, std::string> clientNames;
+
 void clientHandler(SOCKET clientSocket, sockaddr_in clientAddr) {
     char buffer[1024];
     int recvResult;
 
-    // Se primește mesajul de la client
+    // Citim numele clientului
+    recvResult = recv(clientSocket, buffer, sizeof(buffer), 0);
+    if (recvResult > 0) {
+        buffer[recvResult] = '\0';
+        clientNames[clientSocket] = std::string(buffer);  
+        std::cout << "Clientul " << buffer << " s-a conectat." << std::endl;
+    }
+
     while ((recvResult = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0) {
         buffer[recvResult] = '\0';
 
-        // Folosim inet_ntop pentru a obține IP-ul clientului
-        char ipAddress[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(clientAddr.sin_addr), ipAddress, INET_ADDRSTRLEN);
-
-        std::cout << "Client (" << ipAddress << "): " << buffer << std::endl;
+        std::string clientName = clientNames[clientSocket];
+        std::cout << clientName << ": " << buffer << std::endl;
     }
 
     if (recvResult == SOCKET_ERROR) {
         std::cout << "Eroare la primirea datelor de la client!" << std::endl;
     }
 
+    clientNames.erase(clientSocket);
     closesocket(clientSocket);
 }
 
@@ -63,7 +71,7 @@ int main() {
     }
 
     if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
-        std::cout << "Eșec la ascultarea pe socket!" << std::endl;
+        std::cout << "Esec la ascultarea pe socket!" << std::endl;
         closesocket(serverSocket);
         cleanUpWinsock();
         return 1;
@@ -79,13 +87,9 @@ int main() {
         // Acceptă o conexiune de la un client
         clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrSize);
         if (clientSocket == INVALID_SOCKET) {
-            std::cout << "Conexiune client eșuată!" << std::endl;
+            std::cout << "Conexiune client esuata!" << std::endl;
             continue;
         }
-
-        char ipAddress[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(clientAddr.sin_addr), ipAddress, INET_ADDRSTRLEN);
-        std::cout << "Client conectat: " << ipAddress << std::endl;
 
         // Creează un thread pentru a gestiona clientul
         std::thread(clientHandler, clientSocket, clientAddr).detach();  // Detach pentru a rula în fundal
