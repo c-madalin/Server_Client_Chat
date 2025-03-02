@@ -64,7 +64,7 @@ int main() {
     serverAddr.sin_addr.s_addr = INADDR_ANY;  // Ascultă pe orice adresă
 
     if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
-        std::cout << "Binding-ul a eșuat!" << std::endl;
+        std::cout << "Binding-ul a esuat!" << std::endl;
         closesocket(serverSocket);
         cleanUpWinsock();
         return 1;
@@ -77,7 +77,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Serverul ascultă pe portul 9000..." << std::endl;
+    std::cout << "Serverul asculta pe portul 9000..." << std::endl;
 
     while (true) {
         SOCKET clientSocket;
