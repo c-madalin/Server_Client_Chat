@@ -3,14 +3,19 @@
 #include <ws2tcpip.h>
 #include <thread>
 #include <map>
+#include <vector>
+#include <mutex>
 
 #pragma comment(lib, "ws2_32.lib")
 
+std::map<SOCKET, std::string> clientNames;
+std::vector<SOCKET> clients; 
+std::mutex clientsMutex;
+
 void initializeWinsock() {
     WSADATA wsaData;
-    int wsInit = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (wsInit != 0) {
-        std::cout << "Eroare WSAStartup " << wsInit << std::endl;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cout << "Eroare WSAStartup!\n";
         exit(1);
     }
 }
@@ -19,32 +24,53 @@ void cleanUpWinsock() {
     WSACleanup();
 }
 
-std::map<SOCKET, std::string> clientNames;
+// Trimite mesajul tuturor 
+void broadcastMessage(const std::string& message, SOCKET sender) {
+    std::lock_guard<std::mutex> lock(clientsMutex);  
 
-void clientHandler(SOCKET clientSocket, sockaddr_in clientAddr) {
+    for (SOCKET client : clients) {
+        if (client != sender) {  
+            send(client, message.c_str(), message.size(), 0);
+        }
+    }
+}
+
+void clientHandler(SOCKET clientSocket) {
     char buffer[1024];
     int recvResult;
 
-    // Citim numele clientului
+    
     recvResult = recv(clientSocket, buffer, sizeof(buffer), 0);
-    if (recvResult > 0) {
-        buffer[recvResult] = '\0';
-        clientNames[clientSocket] = std::string(buffer);  
-        std::cout << "Clientul " << buffer << " s-a conectat." << std::endl;
+    if (recvResult <= 0) {
+        closesocket(clientSocket);
+        return;
     }
+    buffer[recvResult] = '\0';
+    std::string clientName = buffer;
+
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        clientNames[clientSocket] = clientName;
+        clients.push_back(clientSocket);
+    }
+
+    std::cout << "Clientul " << clientName << " s-a conectat.\n";
 
     while ((recvResult = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0) {
         buffer[recvResult] = '\0';
+        std::string message = clientName + ": " + buffer;
 
-        std::string clientName = clientNames[clientSocket];
-        std::cout << clientName << ": " << buffer << std::endl;
+        std::cout << message << "\n";  
+
+        broadcastMessage(message, clientSocket);
     }
 
-    if (recvResult == SOCKET_ERROR) {
-        std::cout << "Eroare la primirea datelor de la client!" << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        clients.erase(std::remove(clients.begin(), clients.end(), clientSocket), clients.end());
+        clientNames.erase(clientSocket);
     }
 
-    clientNames.erase(clientSocket);
     closesocket(clientSocket);
 }
 
@@ -53,15 +79,15 @@ int main() {
 
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == INVALID_SOCKET) {
-        std::cout << "Crearea socket-ului a eșuat!" << std::endl;
+        std::cout << "Eroare la crearea socket-ului!\n";
         cleanUpWinsock();
         return 1;
     }
 
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(9000);  // Portul 9000
-    serverAddr.sin_addr.s_addr = INADDR_ANY;  // Ascultă pe orice adresă
+    serverAddr.sin_port = htons(9000);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         std::cout << "Binding-ul a esuat!" << std::endl;
@@ -71,28 +97,22 @@ int main() {
     }
 
     if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
-        std::cout << "Esec la ascultarea pe socket!" << std::endl;
+        std::cout << "Eroare la listen!\n";
         closesocket(serverSocket);
         cleanUpWinsock();
         return 1;
     }
 
-    std::cout << "Serverul asculta pe portul 9000..." << std::endl;
+    std::cout << "Serverul rulează pe portul 9000...\n";
 
     while (true) {
-        SOCKET clientSocket;
-        sockaddr_in clientAddr;
-        int clientAddrSize = sizeof(clientAddr);
-
-        // Acceptă o conexiune de la un client
-        clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrSize);
+        SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
         if (clientSocket == INVALID_SOCKET) {
-            std::cout << "Conexiune client esuata!" << std::endl;
+            std::cout << "Eroare la accept!\n";
             continue;
         }
 
-        // Creează un thread pentru a gestiona clientul
-        std::thread(clientHandler, clientSocket, clientAddr).detach();  // Detach pentru a rula în fundal
+        std::thread(clientHandler, clientSocket).detach();  // Thread pentru fiecare client
     }
 
     closesocket(serverSocket);
