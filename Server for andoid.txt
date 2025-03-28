@@ -1,0 +1,85 @@
+#include <iostream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <vector>
+#include <string>
+#include <thread>
+#include <mutex>
+
+std::mutex mtx; 
+
+void clientHandler(int clientSocket) {
+    // Citim numele clientului
+    char buffer[1024];
+    int recvResult = recv(clientSocket, buffer, sizeof(buffer), 0);
+    if (recvResult <= 0) {
+        std::cerr << "Eroare la primirea numelui clientului!" << std::endl;
+        close(clientSocket);
+        return;
+    }
+
+    buffer[recvResult] = '\0';
+    std::string clientName = buffer;
+    std::cout << "Clientul " << clientName << " s-a conectat!" << std::endl;
+
+    // Citește și afișează mesajele de la client
+    while ((recvResult = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0) {
+        buffer[recvResult] = '\0';
+        mtx.lock();
+        std::cout << clientName << ": " << buffer << std::endl;
+        mtx.unlock();
+    }
+
+    if (recvResult < 0) {
+        std::cerr << "Eroare la primirea datelor de la client!" << std::endl;
+    }
+
+    close(clientSocket);
+}
+
+int main() {
+    // Crează socketul pentru server
+    int serverSocket = socket(AF_INET, SOCK_STREAM, 0); 
+    if (serverSocket < 0) {
+        std::cerr << "Eroare la crearea socketului!" << std::endl;
+        return 1;
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(9000);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        std::cerr << "Binding-ul a eșuat!" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
+
+    if (listen(serverSocket, 5) < 0) {
+        std::cerr << "Ascultarea pe socket a eșuat!" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
+
+    std::cout << "Serverul ascultă pe portul 9000..." << std::endl;
+
+    while (true) {
+        sockaddr_in clientAddr;
+        socklen_t clientAddrSize = sizeof(clientAddr);
+        int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrSize);
+
+        if (clientSocket < 0) {
+            std::cerr << "Eroare la acceptarea clientului!" << std::endl;
+            continue;
+        }
+
+        // Creează un thread pentru fiecare client
+        std::thread(clientHandler, clientSocket).detach();
+    }
+
+    close(serverSocket);
+    return 0;
+}
